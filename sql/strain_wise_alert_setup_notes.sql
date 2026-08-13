@@ -1,0 +1,61 @@
+-------------------------------------------------------------------------------
+-- Strain Wise alert setup notes (Broiler Birds / Country Birds)
+-- Procedure : strain_wise_fa_bro_prod_perfrm
+-- File      : sql/strain_wise_alert.sql
+-------------------------------------------------------------------------------
+--
+-- Breed classification uses fnd_lookup_values:
+--
+--   Country Birds (SASSO, SONALI, ...):
+--     LOOKUP_TYPE         = 'SUG_BREED_DETAILS'
+--     ENABLED_FLAG        = 'Y'
+--     ATTRIBUTE_CATEGORY  = 'Country Bird'
+--     active on sysdate
+--
+--   Broiler Birds (ROSS, LOHMANN IR, EPEFPLUS, ...):
+--     LOOKUP_TYPE         = 'SUG_BREED_DETAILS'
+--     ENABLED_FLAG        = 'Y'
+--     ATTRIBUTE_CATEGORY <> 'Country Bird'
+--     active on sysdate
+--
+-- p_grp values:
+--   0 = Strain Wise - Broiler Production Performance
+--   1 = Strain Wise PS Region Wise Broiler Performance (all breeds)
+--   2 = Strain Wise Broiler Region Wise Performance
+--   3 = Broiler Birds(Closed Farms)  -- filtered breeds
+--   4 = Country Birds(Closed Farms) -- filtered breeds
+--
+-- Configure TWO alert schedules / jobs:
+--
+-- 1) Broiler Birds (Closed Farms)  --> p_grp = 3
+--    Alert Name / Subject:
+--      Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)
+--    Call:
+--      begin
+--        strain_wise_fa_bro_prod_perfrm(
+--          p_alert_id => <broiler_alert_id>,
+--          p_grp      => 3,
+--          p_type     => 'W'   -- or 'M'
+--        );
+--      end;
+--      /
+--
+-- 2) Country Birds (Closed Farms)  --> p_grp = 4
+--    Alert Name / Subject:
+--      Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)
+--    Call:
+--      begin
+--        strain_wise_fa_bro_prod_perfrm(
+--          p_alert_id => <country_alert_id>,
+--          p_grp      => 4,
+--          p_type     => 'W'   -- or 'M'
+--        );
+--      end;
+--      /
+--
+-- Notes:
+--   * p_grp 3 and 4 use the same PS Region Wise layout as p_grp 1.
+--   * If sug_alert_param_v.subject is populated it overrides the default
+--     subject; leave subject null or set it to the names above.
+-------------------------------------------------------------------------------
+/
