@@ -479,7 +479,7 @@ begin
     for i in c_alert loop
       l_lob_id := sug_clob_gtt_s.nextval;
       for j in c1(i.ledger_id, i.zone, i.org_id, i.cluster_name, i.orgn_id) loop
-        if j.breed <> 'Grand Total' then continue; end if;
+        if j.label <> 'Grand Total' then continue; end if;
         --positive
         l_feed_gm_ps  := j.feed_gms + (j.feed_gms*5/100);
         l_feed_in_ps  := j.feed_intake_perc + (j.feed_intake_perc*5/100);
