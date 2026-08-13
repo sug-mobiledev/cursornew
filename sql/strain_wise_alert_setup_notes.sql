@@ -1,0 +1,59 @@
+-------------------------------------------------------------------------------
+-- Strain Wise alert setup notes (Broiler Birds / Country Birds)
+-- Procedure : strain_wise_fa_bro_prod_perfrm
+-- File      : sql/strain_wise_alert.sql
+-------------------------------------------------------------------------------
+--
+-- Breed classification uses fnd_lookup_values:
+--
+--   Country Birds (SASSO, SONALI, ...):
+--     LOOKUP_TYPE         = 'SUG_BREED_DETAILS'
+--     ENABLED_FLAG        = 'Y'
+--     ATTRIBUTE_CATEGORY  = 'Country Bird'
+--     active on sysdate
+--
+--   Broiler Birds (ROSS, LOHMANN IR, EPEFPLUS, ...):
+--     LOOKUP_TYPE         = 'SUG_BREED_DETAILS'
+--     ENABLED_FLAG        = 'Y'
+--     ATTRIBUTE_CATEGORY <> 'Country Bird'
+--     active on sysdate
+--
+-- Configure TWO alert schedules / jobs:
+--
+-- 1) Broiler Birds (Closed Farms)
+--    Alert Name / Subject:
+--      Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)
+--    Call:
+--      begin
+--        strain_wise_fa_bro_prod_perfrm(
+--          p_alert_id  => <broiler_alert_id>,
+--          p_grp       => 1,
+--          p_type      => 'W',   -- or 'M'
+--          p_bird_type => 'B'
+--        );
+--      end;
+--      /
+--
+-- 2) Country Birds (Closed Farms)
+--    Alert Name / Subject:
+--      Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)
+--    Call:
+--      begin
+--        strain_wise_fa_bro_prod_perfrm(
+--          p_alert_id  => <country_alert_id>,
+--          p_grp       => 1,
+--          p_type      => 'W',   -- or 'M'
+--          p_bird_type => 'C'
+--        );
+--      end;
+--      /
+--
+-- Notes:
+--   * p_bird_type defaults to 'B' (Broiler) for backward compatibility.
+--   * If sug_alert_param_v.subject is populated it overrides the default
+--     subject derived from p_grp + p_bird_type; leave subject null or set
+--     it to the names above.
+--   * Layout/columns of the HTML email remain as in the existing alert
+--     (Business Unit, Breed/Strain, PS Farm Type, performance & GC metrics).
+-------------------------------------------------------------------------------
+/
