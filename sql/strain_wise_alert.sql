@@ -1,43 +1,32 @@
 /*==============================================================================
   Procedure : strain_wise_fa_bro_prod_perfrm
-  Purpose   : Strain Wise PS Region Wise Broiler Performance alerts
-              split by bird category (Broiler / Country) using lookup
-              SUG_BREED_DETAILS (ATTRIBUTE_CATEGORY).
+  Purpose   : Strain Wise Broiler / Country Birds performance alerts.
+              p_grp 3 and 4 use SUG_BREED_DETAILS (ATTRIBUTE_CATEGORY)
+              to split Broiler Birds vs Country Birds (Closed Farms).
 
   Parameters:
     p_alert_id  - Alert ID from sug_alert_param_v
     p_grp       - 0 = Strain Wise Broiler Production Performance
                   1 = Strain Wise PS Region Wise Broiler Performance
                   2 = Strain Wise Broiler Region Wise Performance
+                  3 = Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)
+                      (ATTRIBUTE_CATEGORY <> 'Country Bird' e.g. ROSS, LOHMANN IR, EPEFPLUS)
+                  4 = Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)
+                      (ATTRIBUTE_CATEGORY = 'Country Bird' e.g. SASSO, SONALI)
     p_type      - 'W' = Weekly, 'M' = Monthly
-    p_bird_type - 'B' = Broiler Birds (ATTRIBUTE_CATEGORY <> 'Country Bird')
-                  'C' = Country Birds (ATTRIBUTE_CATEGORY = 'Country Bird')
-                  e.g. SASSO, SONALI = Country; ROSS, LOHMANN IR, EPEFPLUS = Broiler
-
-  Alert Names (p_grp = 1):
-    Broiler : Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)
-    Country : Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)
 
   Sample calls:
-    strain_wise_fa_bro_prod_perfrm(<alert_id>, 1, 'W', 'B'); -- Broiler Birds
-    strain_wise_fa_bro_prod_perfrm(<alert_id>, 1, 'W', 'C'); -- Country Birds
+    strain_wise_fa_bro_prod_perfrm(<alert_id>, 3, 'W'); -- Broiler Birds
+    strain_wise_fa_bro_prod_perfrm(<alert_id>, 4, 'W'); -- Country Birds
 ==============================================================================*/
-procedure strain_wise_fa_bro_prod_perfrm(p_alert_id number, p_grp number, p_type varchar2, p_bird_type varchar2 default 'B') as
+procedure strain_wise_fa_bro_prod_perfrm(p_alert_id number, p_grp number, p_type varchar2) as
  
-  l_subject     varchar2(200) := case
-                                      when p_grp = 0 and upper(p_bird_type) = 'C' then
-                                        'Strain Wise - Country Birds Production Performance'
-                                      when p_grp = 0 then
-                                        'Strain Wise - Broiler Production Performance'
-                                      when p_grp = 1 and upper(p_bird_type) = 'C' then
-                                        'Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)'
-                                      when p_grp = 1 then
-                                        'Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)'
-                                      when p_grp = 2 and upper(p_bird_type) = 'C' then
-                                        'Strain Wise Country Birds Region Wise Performance'
-                                      when p_grp = 2 then
-                                        'Strain Wise Broiler Region Wise Performance'
-                                      end;
+  l_subject     varchar2(200) := case when p_grp = 0 then 'Strain Wise - Broiler Production Performance'
+                                      when p_grp = 1 then 'Strain Wise PS Region Wise Broiler Performance'
+                                      when p_grp = 2 then 'Strain Wise Broiler Region Wise Performance'
+                                      when p_grp = 3 then 'Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)'
+                                      when p_grp = 4 then 'Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)'
+                                 end;
                                       
   en            varchar2(120) := '<br><left>* Please do not reply to this E-Mail. This e-mail address is not monitored.,ID:' || p_alert_id || '</left>';
   l_lob_id      number;
@@ -235,14 +224,14 @@ procedure strain_wise_fa_bro_prod_perfrm(p_alert_id number, p_grp number, p_type
     select label,
        zspan,
        case
-         when p_grp in (1,2) then
+         when p_grp in (1,2,3,4) then
           count(region) over(partition by region)-1
        end as rspan,
         case when 
-         p_grp in (1,2) then 
+         p_grp in (1,2,3,4) then 
           count (cage) over (partition by breed,region)
          end as breedpan,
-       sum(case when breed is null then 0 else no_of_farms end) over(partition by case when p_grp = 2 then zone end, case when p_grp in (1,2) then region else breed end)  tot,
+       sum(case when breed is null then 0 else no_of_farms end) over(partition by case when p_grp = 2 then zone end, case when p_grp in (1,2,3,4) then region else breed end)  tot,
        zone,
        region,
        breed,
@@ -271,8 +260,8 @@ procedure strain_wise_fa_bro_prod_perfrm(p_alert_id number, p_grp number, p_type
   from(
 select distinct
            case
-                when p_grp = 1 and region is not null and breed is null then region||' Total' 
-                when p_grp = 1 and region is null     and breed is null then 'Grand Total' 
+                when p_grp in (1,3,4) and region is not null and breed is null then region||' Total' 
+                when p_grp in (1,3,4) and region is null     and breed is null then 'Grand Total' 
                
                 else '-' end label,
            case
@@ -287,7 +276,7 @@ select distinct
          1 in (1,2) then 
          count (cage) over (partition by breed)-1
          end as breedpan,
-           sum(case when breed is null then 0 else no_of_farms end) over(partition by case when p_grp = 2 then zone end, case when p_grp in (1,2) then region else breed end) tot,
+           sum(case when breed is null then 0 else no_of_farms end) over(partition by case when p_grp = 2 then zone end, case when p_grp in (1,2,3,4) then region else breed end) tot,
            case when p_grp = 2 then zone end zone,
            region,
            breed,
@@ -315,7 +304,7 @@ select distinct
            sug_gn.round_x(return_feed_perc, 1) return_feed_perc,nvl(zone_seq,9) zone_seq
     from   (select case when p_grp = 2 then nvl(b.opm_zone,'-') end zone,
                    case when p_grp = 2 then max(nvl(b.zone_seq,'9')) end zone_seq,
-                   case when p_grp = 1 then nvl(b.region, 'Outside Purchase') when p_grp = 2 then b.region end as region,
+                   case when p_grp in (1,3,4) then nvl(b.region, 'Outside Purchase') when p_grp = 2 then b.region end as region,
                    breed,
                    cage,
                    sum(a.no_of_farms) no_of_farms,
@@ -348,7 +337,7 @@ select distinct
             from   (select nvl(g.attribute16,c.breed) breed,x.ATTRIBUTE9 cage,
                            c.farm_code,
                            case when p_grp in (0,2) then c.branch_code
-                                when p_grp = 1 then
+                                when p_grp in (1,3,4) then
                                 case when sug_mis_opm_pkg.is_number(substr(nvl(c.hatchery_lot, 'XXX'), -3, 3)) = 1 
                                      then substr(c.hatchery_lot, -6, 3) else 'XXX' end
                            end as branch_code,
@@ -406,27 +395,30 @@ select distinct
                    and    nvl(d.cluster_name, 'NA') =
                           nvl(cp_cluster, nvl(d.cluster_name, 'NA'))
                    and    d.branch_id = nvl(cp_orgn_id, d.branch_id)
-                    /* Bird category filter from SUG_BREED_DETAILS
-                       Country Birds : ATTRIBUTE_CATEGORY = 'Country Bird' (SASSO, SONALI)
-                       Broiler Birds : ATTRIBUTE_CATEGORY <> 'Country Bird' (ROSS, LOHMANN IR, EPEFPLUS) */
-                    and    exists (
-                             select 1
-                             from   fnd_lookup_values flv
-                             where  flv.lookup_type = 'SUG_BREED_DETAILS'
-                             and    flv.enabled_flag = 'Y'
-                             and    trunc(sysdate) between flv.start_date_active
-                                                     and nvl(flv.end_date_active, trunc(sysdate))
-                             and    upper(trim(flv.attribute1)) = upper(trim(nvl(g.attribute16, c.breed)))
-                             and    (
-                                      (upper(p_bird_type) = 'C' and flv.attribute_category = 'Country Bird')
-                                   or (upper(nvl(p_bird_type, 'B')) = 'B' and nvl(flv.attribute_category, 'X') <> 'Country Bird')
-                                   )
+                    /* Bird category filter for p_grp 3/4 from SUG_BREED_DETAILS
+                       p_grp = 3 Broiler Birds : ATTRIBUTE_CATEGORY <> 'Country Bird'
+                       p_grp = 4 Country Birds : ATTRIBUTE_CATEGORY = 'Country Bird' */
+                    and    (
+                             p_grp not in (3, 4)
+                          or exists (
+                               select 1
+                               from   fnd_lookup_values flv
+                               where  flv.lookup_type = 'SUG_BREED_DETAILS'
+                               and    flv.enabled_flag = 'Y'
+                               and    trunc(sysdate) between flv.start_date_active
+                                                       and nvl(flv.end_date_active, trunc(sysdate))
+                               and    upper(trim(flv.attribute1)) = upper(trim(nvl(g.attribute16, c.breed)))
+                               and    (
+                                        (p_grp = 4 and flv.attribute_category = 'Country Bird')
+                                     or (p_grp = 3 and nvl(flv.attribute_category, 'X') <> 'Country Bird')
+                                     )
+                             )
                            )
                     group  by nvl(g.attribute16,c.breed),
                               c.farm_code,
                               x.ATTRIBUTE9,
                               case when p_grp in (0,2) then c.branch_code
-                                   when p_grp = 1 then
+                                   when p_grp in (1,3,4) then
                                    case when sug_mis_opm_pkg.is_number(substr(nvl(c.hatchery_lot, 'XXX'), -3, 3)) = 1 
                                         then substr(c.hatchery_lot, -6, 3) else 'XXX' end
                               end) a,
@@ -434,13 +426,13 @@ select distinct
             where  1 = 1
             and    b.branch_code = a.branch_code
            --- and    b.region_code='BG'
-            group  by rollup(case when p_grp = 2 then nvl(b.opm_zone,'-') end, case when p_grp = 1 then nvl(b.region, 'Outside Purchase') when p_grp = 2 then b.region end, breed,cage))
+            group  by rollup(case when p_grp = 2 then nvl(b.opm_zone,'-') end, case when p_grp in (1,3,4) then nvl(b.region, 'Outside Purchase') when p_grp = 2 then b.region end, breed,cage))
    where 1=1
 
  order  by zone_seq, tot desc, decode(region,'Outside Purchase', 'ZZZ', region),
             case 
-                 when p_grp = 1 and region is not null  and breed  is null  then 2  
-                 when p_grp = 1 and region is null      and breed is null  then 3
+                 when p_grp in (1,3,4) and region is not null  and breed  is null  then 2  
+                 when p_grp in (1,3,4) and region is null      and breed is null  then 3
                   
                  else 1 end, breed ,cage 
                   
@@ -448,8 +440,8 @@ select distinct
                       and ((label='-' and (region is not null and breed is not null and cage is not null))or label like '%Total%')
                       order  by zone_seq,  (case when tot= 0 then 1000000 else tot end )desc, decode(region,'Outside Purchase', 'ZZZ', region),
             case 
-                 when p_grp = 1 and region is not null  and breed  is null  then 2  
-                 when p_grp = 1 and region is null  and breed is null  then 3
+                 when p_grp in (1,3,4) and region is not null  and breed  is null  then 2  
+                 when p_grp in (1,3,4) and region is null  and breed is null  then 3
                   
                  else 1 end, breed ,cage 
                    ;
@@ -542,12 +534,12 @@ begin
       ol('<TABLE border=1 cellpadding=0 cellspacing=0>');
       ol(htrh);
     
-      if p_grp in (1,2) then
+      if p_grp in (1,2,3,4) then
         ol(htd(td => 'H', l => 'L', d => 'Business Unit'));
       end if;
       
       ol(htd(td => 'H', l => 'L', d => 'Breed/Strain'));
-      if p_grp =1 then
+      if p_grp in (1,3,4) then
       ol(htd(td => 'H', l => 'L', d => 'PS Farm<br>Type'));
       end if;
       --ol(htd(td => 'H', l => 'R', d => 'No.of<br>Farms'));
@@ -593,16 +585,16 @@ begin
        
         if j.label = '-' then
         
-          if p_grp in (1,2) and nvl(l_region,'X') <> j.region then
+          if p_grp in (1,2,3,4) and nvl(l_region,'X') <> j.region then
             ol(htd(b => l_bold, l => 'L', e => 'rowspan="'||to_char(j.rspan)||'" nowrap', d => j.region));
           end if;
           
-          if p_grp in (1,2) and nvl(l_breed,'X') <> j.breed or nvl(l_region,'X') <> j.region  then
+          if p_grp in (1,2,3,4) and nvl(l_breed,'X') <> j.breed or nvl(l_region,'X') <> j.region  then
             ol(htd(b => l_bold, l => 'L', e => 'rowspan="'||to_char(j.breedpan)||'" nowrap', d => j.breed));
           end if;
           
         
-          if p_grp =1 then
+          if p_grp in (1,3,4) then
           ol(htd(b => l_bold, l => 'L', e => 'nowrap', d => nvl(nullif(j.cage,'-'),'&nbsp')));
           end if;
         end if;
@@ -618,7 +610,7 @@ begin
         if j.label = 'Grand Total' then
           
       
-          ol(htd(b => l_bold, l => 'R', e => 'colspan="'||to_char(p_grp+1+1)||'"', d => case when i.level_code = 'B' then 'Branch Total'
+          ol(htd(b => l_bold, l => 'R', e => 'colspan="'||to_char(case when p_grp in (3,4) then 3 else p_grp+1+1 end)||'"', d => case when i.level_code = 'B' then 'Branch Total'
                                                                                            when i.level_code = 'C' then 'Cluster Total'
                                                                                            when i.level_code = 'R' then 'Region Total'
                                                                                            when i.level_code = 'Z' then 'Zone Total'

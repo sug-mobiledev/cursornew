@@ -18,42 +18,44 @@
 --     ATTRIBUTE_CATEGORY <> 'Country Bird'
 --     active on sysdate
 --
+-- p_grp values:
+--   0 = Strain Wise - Broiler Production Performance
+--   1 = Strain Wise PS Region Wise Broiler Performance (all breeds)
+--   2 = Strain Wise Broiler Region Wise Performance
+--   3 = Broiler Birds(Closed Farms)  -- filtered breeds
+--   4 = Country Birds(Closed Farms) -- filtered breeds
+--
 -- Configure TWO alert schedules / jobs:
 --
--- 1) Broiler Birds (Closed Farms)
+-- 1) Broiler Birds (Closed Farms)  --> p_grp = 3
 --    Alert Name / Subject:
 --      Strain Wise PS Region Wise Broiler Performance - Broiler Birds(Closed Farms)
 --    Call:
 --      begin
 --        strain_wise_fa_bro_prod_perfrm(
---          p_alert_id  => <broiler_alert_id>,
---          p_grp       => 1,
---          p_type      => 'W',   -- or 'M'
---          p_bird_type => 'B'
+--          p_alert_id => <broiler_alert_id>,
+--          p_grp      => 3,
+--          p_type     => 'W'   -- or 'M'
 --        );
 --      end;
 --      /
 --
--- 2) Country Birds (Closed Farms)
+-- 2) Country Birds (Closed Farms)  --> p_grp = 4
 --    Alert Name / Subject:
 --      Strain Wise PS Region Wise Broiler Performance - Country Birds(Closed Farms)
 --    Call:
 --      begin
 --        strain_wise_fa_bro_prod_perfrm(
---          p_alert_id  => <country_alert_id>,
---          p_grp       => 1,
---          p_type      => 'W',   -- or 'M'
---          p_bird_type => 'C'
+--          p_alert_id => <country_alert_id>,
+--          p_grp      => 4,
+--          p_type     => 'W'   -- or 'M'
 --        );
 --      end;
 --      /
 --
 -- Notes:
---   * p_bird_type defaults to 'B' (Broiler) for backward compatibility.
+--   * p_grp 3 and 4 use the same PS Region Wise layout as p_grp 1.
 --   * If sug_alert_param_v.subject is populated it overrides the default
---     subject derived from p_grp + p_bird_type; leave subject null or set
---     it to the names above.
---   * Layout/columns of the HTML email remain as in the existing alert
---     (Business Unit, Breed/Strain, PS Farm Type, performance & GC metrics).
+--     subject; leave subject null or set it to the names above.
 -------------------------------------------------------------------------------
 /
