@@ -374,22 +374,31 @@ select distinct
                    and    nvl(d.cluster_name, 'NA') =
                           nvl(cp_cluster, nvl(d.cluster_name, 'NA'))
                    and    d.branch_id = nvl(cp_orgn_id, d.branch_id)
-                    -- p_grp 3 Broiler / p_grp 4 Country from SUG_BREED_DETAILS
+                    -- Groups 0, 1 and 2 bypass the breed lookup.
+                    -- Group 3 applies only the Broiler Birds lookup.
+                    -- Group 4 applies only the Country Birds lookup.
                     and    (
                              p_grp not in (3, 4)
-                          or exists (
+                          or (p_grp = 3 and exists (
                                select 1
                                from   fnd_lookup_values flv
                                where  flv.lookup_type = 'SUG_BREED_DETAILS'
                                and    flv.enabled_flag = 'Y'
+                               and    flv.attribute_category <> 'Country Bird'
                                and    trunc(sysdate) between flv.start_date_active
                                                        and nvl(flv.end_date_active, trunc(sysdate))
                                and    upper(trim(flv.attribute1)) = upper(trim(nvl(g.attribute16, c.breed)))
-                               and    (
-                                        (p_grp = 4 and flv.attribute_category = 'Country Bird')
-                                     or (p_grp = 3 and nvl(flv.attribute_category, 'X') <> 'Country Bird')
-                                     )
-                             )
+                             ))
+                          or (p_grp = 4 and exists (
+                               select 1
+                               from   fnd_lookup_values flv
+                               where  flv.lookup_type = 'SUG_BREED_DETAILS'
+                               and    flv.enabled_flag = 'Y'
+                               and    flv.attribute_category = 'Country Bird'
+                               and    trunc(sysdate) between flv.start_date_active
+                                                       and nvl(flv.end_date_active, trunc(sysdate))
+                               and    upper(trim(flv.attribute1)) = upper(trim(nvl(g.attribute16, c.breed)))
+                             ))
                            )
                     group  by nvl(g.attribute16,c.breed),
                               c.farm_code,
@@ -479,7 +488,7 @@ begin
     for i in c_alert loop
       l_lob_id := sug_clob_gtt_s.nextval;
       for j in c1(i.ledger_id, i.zone, i.org_id, i.cluster_name, i.orgn_id) loop
-        if j.label <> 'Grand Total' then continue; end if;
+        if j.breed <> 'Grand Total' then continue; end if;
         --positive
         l_feed_gm_ps  := j.feed_gms + (j.feed_gms*5/100);
         l_feed_in_ps  := j.feed_intake_perc + (j.feed_intake_perc*5/100);
