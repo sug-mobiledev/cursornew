@@ -4,78 +4,137 @@
 -------------------------------------------------------------------------------
 --
 -- PURPOSE
---   Stop users from using Actions > Cancel on the Sales Orders (order
---   creation) screen. Applies to both header (Order Information) and
---   line (Line Items) Actions lists. API / workflow cancel is unchanged.
+--   Restrict the manual Cancel option on the order creation screen
+--   (Sales Orders form). Covers Actions on Order Information (header)
+--   and Line Items (line). API / workflow cancel is not changed.
 --
--- FORM / FUNCTION
+-- FORM
 --   Form name     : OEXOEORD
 --   User form     : Sales Orders
---   Function name : ONT_OEXOEORD
+--   Function      : ONT_OEXOEORD
 --   Navigation    : Order Management Super User
 --                   > Orders, Returns > Sales Orders
 --
--- RULE (Forms Personalization)
---   Seq           : next free sequence on OEXOEORD (script uses MAX+10)
---   Description   : Restrict manual Cancel from Actions
---   Level         : Form
---   Enabled       : Yes
---   Trigger Event : WHEN-NEW-RECORD-INSTANCE
---   Trigger Object: ACTIONS
---   Condition     : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
---   Processing    : Not in Enter-Query Mode
---   Context       : Site (change to Responsibility if only some users
---                   should be blocked)
---
---   Action Seq    : 10
---   Type          : Message
---   Message Type  : Error
---   Message Text  : Manual Cancel is not allowed from the Sales Order
---                   form. Please contact the Order Management
---                   administrator.
---
 -------------------------------------------------------------------------------
--- METHOD 1 (recommended for DEV): define in the form
+-- METHOD 1 (DEV): key the personalizations in the form
 -------------------------------------------------------------------------------
 --
--- 1. Profiles (needed to open Personalize):
---      Hide Diagnostics menu entry = No
---      Utilities: Diagnostics     = Yes
+-- Profiles:
+--   Hide Diagnostics menu entry = No
+--   Utilities: Diagnostics     = Yes
 --
--- 2. Open Sales Orders, query or create an order, go to Line Items.
+-- Open Sales Orders (create or query an order).
+-- Help > Diagnostics > Custom Code > Personalize
 --
--- 3. Help > Diagnostics > Custom Code > Personalize
+-- Enter TWO enabled rules. Save. Close the form fully and reopen.
 --
--- 4. Enter the Rule / Condition / Context / Action values listed above.
---    Save. Close Sales Orders completely and reopen.
+-- ---------------------------------------------------------------------------
+-- RULE 1 of 2  (required)  -- block selecting Cancel
+-- ---------------------------------------------------------------------------
+-- Condition tab
+--   Seq            : 10   (or next free sequence)
+--   Description    : Restrict manual Cancel - block select
+--   Level          : Form
+--   Enabled        : Yes
+--   Trigger Event  : WHEN-NEW-RECORD-INSTANCE
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
 --
--- 5. Confirm the Actions block/item names with Examine if the rule does
---    not fire:
---      Open Actions, highlight Cancel
---      Help > Diagnostics > Examine
---      Block should be ACTIONS, Field should be ACTION, Value Cancel
---    If the field name differs (ACTION_NAME, USER_ACTION, etc.), change
---    the personalization Condition to match, for example:
---      UPPER(LTRIM(RTRIM(:ACTIONS.ACTION_NAME))) = 'CANCEL'
+-- Context tab
+--   Level          : Site
+--   Value          : (blank)
 --
--- 6. Test:
---      [ ] Line Items > Actions > Cancel shows the error and does not
---          open the Cancel window
---      [ ] Order Information > Actions > Cancel is also blocked
---      [ ] Other Actions (Copy, Price Line, Apply Holds, ...) still work
---      [ ] Close/reopen the form after saving the personalization
+-- Actions tab
+--   Seq            : 10
+--   Type           : Message
+--   Language       : All
+--   Enabled        : Yes
+--   Message Type   : Error
+--   Message Text   : Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.
 --
--- 7. If you need to recover a broken form:
---      Help > Diagnostics > Custom Code > Off
---      then reopen Personalize and disable or fix the rule.
+-- ---------------------------------------------------------------------------
+-- RULE 2 of 2  (required)  -- block OK if Cancel is still selected
+-- ---------------------------------------------------------------------------
+-- Condition tab
+--   Seq            : 20
+--   Description    : Restrict manual Cancel - block OK
+--   Level          : Form
+--   Enabled        : Yes
+--   Trigger Event  : WHEN-VALIDATE-RECORD
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
+--
+-- Context tab
+--   Level          : Site
+--
+-- Actions tab
+--   Seq            : 10
+--   Type           : Message
+--   Language       : All
+--   Enabled        : Yes
+--   Message Type   : Error
+--   Message Text   : Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.
+--
+-- ---------------------------------------------------------------------------
+-- RULE 3        (optional)  -- hide Cancel from the Actions list
+-- ---------------------------------------------------------------------------
+-- Enable this only after Rule 1 and 2 work. If the Actions window fails
+-- to open, disable this rule (Enabled = No).
+--
+-- Condition tab
+--   Seq            : 30
+--   Description    : Restrict manual Cancel - hide from list
+--   Level          : Form
+--   Enabled        : No     -- set to Yes after DEV test
+--   Trigger Event  : WHEN-NEW-RECORD-INSTANCE
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
+--
+-- Context tab
+--   Level          : Site
+--
+-- Actions tab
+--   Seq            : 10
+--   Type           : Builtin
+--   Language       : All
+--   Enabled        : Yes
+--   Builtin Type   : DO_KEY
+--   Argument       : DELETE_RECORD
 --
 -------------------------------------------------------------------------------
--- METHOD 2: install with SQL (TEST / PROD after DEV sign-off)
+-- If the rule does not fire
+-------------------------------------------------------------------------------
+--
+-- Open Actions, highlight Cancel, then:
+--   Help > Diagnostics > Examine
+--
+-- Confirm:
+--   Block = ACTIONS
+--   Field = ACTION
+--   Value = Cancel
+--
+-- If the field name is different, change the Condition, for example:
+--   UPPER(LTRIM(RTRIM(:ACTIONS.ACTION_NAME))) = 'CANCEL'
+--   UPPER(LTRIM(RTRIM(:ACTIONS.USER_ACTION))) = 'CANCEL'
+--
+-- Recover a broken form:
+--   Help > Diagnostics > Custom Code > Off
+--   then Personalize and disable the failing rule.
+--
+-------------------------------------------------------------------------------
+-- METHOD 2: SQL install (TEST / PROD after DEV sign-off)
 -------------------------------------------------------------------------------
 --
 --   sqlplus apps/<pwd> @sql/oexoeord_restrict_manual_cancel.sql
 --
--- Re-runnable. Identified by RULE_KEY = SUG_OEXOEORD_NO_MANUAL_CANCEL.
+-- Re-runnable. Replaces these rule keys:
+--   SUG_OEXOEORD_BLOCK_CANCEL_SELECT
+--   SUG_OEXOEORD_BLOCK_CANCEL_OK
+--   SUG_OEXOEORD_HIDE_CANCEL
+--   SUG_OEXOEORD_NO_MANUAL_CANCEL   (older single-rule key)
 --
 -- Verify:
 --
@@ -88,98 +147,72 @@
 --          r.enabled rule_enabled,
 --          a.action_type,
 --          a.message_type,
---          a.message_text,
---          a.enabled action_enabled
+--          a.builtin_type,
+--          a.builtin_arguments,
+--          a.message_text
 --     from fnd_form_custom_rules r,
 --          fnd_form_custom_actions a
 --    where r.id = a.rule_id
---      and r.rule_key = 'SUG_OEXOEORD_NO_MANUAL_CANCEL';
+--      and r.rule_key like 'SUG_OEXOEORD_%CANCEL%'
+--    order by r.sequence, a.sequence;
 --
--- Disable (do not delete) if it must be turned off quickly:
+-- Disable all three quickly:
 --
 --   update fnd_form_custom_rules
 --      set enabled = 'N',
 --          last_update_date = sysdate,
 --          last_updated_by = nvl(fnd_global.user_id, last_updated_by)
---    where rule_key = 'SUG_OEXOEORD_NO_MANUAL_CANCEL';
+--    where rule_key like 'SUG_OEXOEORD_%CANCEL%';
 --   commit;
 --
--- Restrict to one responsibility instead of Site (optional):
+-- Enable hide-from-list after DEV test:
 --
---   1. Query responsibility_id:
---        select responsibility_id, responsibility_name
---          from fnd_responsibility_vl
---         where responsibility_name = '<your OM responsibility>';
+--   update fnd_form_custom_rules
+--      set enabled = 'Y',
+--          last_update_date = sysdate
+--    where rule_key = 'SUG_OEXOEORD_HIDE_CANCEL';
+--   commit;
 --
---   2. In Personalize, set Context Level = Responsibility and choose
---      that responsibility (or update fnd_form_custom_scopes:
---      level_id = 10003, level_value = <responsibility_id>,
---      level_value_application_id = 660 for Order Management).
+-- Responsibility-level (optional):
+--   In Personalize, Context Level = Responsibility.
+--   Or update fnd_form_custom_scopes:
+--     level_id = 10003
+--     level_value = <responsibility_id>
+--     level_value_application_id = 660
 --
--- FNDLOAD (after creating in DEV):
---
---   Download:
---     FNDLOAD apps/<pwd> 0 Y DOWNLOAD $FND_TOP/patch/115/import/affrmcus.lct
---       SUG_OEXOEORD_NO_MANUAL_CANCEL.ldt
---       FND_FORM_CUSTOM_RULES function_name=ONT_OEXOEORD
---
---   Upload (replaces ALL personalizations for that function):
---     FNDLOAD apps/<pwd> 0 Y UPLOAD $FND_TOP/patch/115/import/affrmcus.lct
---       SUG_OEXOEORD_NO_MANUAL_CANCEL.ldt
---
---   Prefer the SQL script in this folder for TEST/PROD so existing
---   OEXOEORD personalizations are not wiped.
+-- Do not FNDLOAD-upload for function ONT_OEXOEORD unless you intend to
+-- replace every personalization on that function. Prefer this SQL script.
 --
 -------------------------------------------------------------------------------
--- OPTIONAL: also hide Cancel from the list
+-- TEST
 -------------------------------------------------------------------------------
 --
--- If the business wants Cancel removed from the Actions list rather than
--- only blocked, add a second action on the same rule (or a new rule with
--- the same trigger/condition), BEFORE the Error message:
---
---   Type         : Builtin
---   Builtin Type : DO_KEY
---   Argument     : DELETE_RECORD
---
--- Only use this if Examine shows ACTIONS is a multi-record block with
--- DELETE allowed. Test that other actions remain and the window still
--- opens. Keep the Error message as a safety net.
+--   [ ] Close and reopen Sales Orders after saving
+--   [ ] Line Items > Actions > Cancel shows the error (or is hidden)
+--   [ ] Cancel window does not open
+--   [ ] Order Information > Actions > Cancel is also restricted
+--   [ ] Copy, Price Line, Apply Holds, Calculate Tax still work
+--   [ ] Find % in the Actions window still lists the other actions
 --
 -------------------------------------------------------------------------------
--- OPTIONAL: Processing Constraints (OM security, not personalization)
+-- OPTIONAL: Processing Constraints (OM security)
 -------------------------------------------------------------------------------
 --
--- Personalization only blocks the form UI. To stop Cancel from every
--- user session while still allowing system/API cancel:
+-- Personalization only affects the form. To block Cancel even when
+-- Custom Code is Off, also set:
 --
---   Order Management Super User
---     > Setup > Rules > Security > Processing Constraints
---
+--   Setup > Rules > Security > Processing Constraints
 --   Application : Oracle Order Management
---   Entity      : Order Header   (repeat for Order Line)
---
+--   Entity      : Order Header  (repeat for Order Line)
 --   Operation   : Cancel
---   Attribute   : (blank)
 --   User Action : Not Allowed
 --   Enabled     : Yes
---   Conditions  : none (always)  -- or add a validation template if
---                 cancel should be blocked only after Booking, etc.
 --
---   Then run:
---     Setup > Rules > Security > Generate Constraints Validation Package
+-- Then run Generate Constraints Validation Package.
 --
--- Use this in addition to personalization when cancel must be prevented
--- even if Diagnostics > Custom Code is set to Off.
+-- Quantity reduced to 0 after the cancellation point is a separate cancel
+-- path; use processing constraints for that, not this personalization.
 --
--------------------------------------------------------------------------------
--- NOTES
---   * Reducing Ordered Quantity to 0 after the cancellation point is a
---     different cancel path (processing constraints). Personalization of
---     Actions > Cancel does not cover quantity-to-zero.
---   * Quick Sales Orders uses form OEXOETEL; clone this rule there if
---     that screen must be restricted as well.
---   * Non-English instances: compare to the translated Actions label, or
---     use the internal action code field if Examine shows one.
+-- Quick Sales Orders is form OEXOETEL; clone these rules there if needed.
 -------------------------------------------------------------------------------
 /

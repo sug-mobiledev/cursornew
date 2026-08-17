@@ -3,156 +3,271 @@
 --
 -- Form     : OEXOEORD (Sales Orders / order creation screen)
 -- Function : ONT_OEXOEORD
--- Rule key : SUG_OEXOEORD_NO_MANUAL_CANCEL
 --
--- When a user opens Actions from Order Information or Line Items and
--- highlights Cancel, Forms Personalization raises an error and stops the
--- action. System / API cancellation is not affected.
+-- Rule keys:
+--   SUG_OEXOEORD_BLOCK_CANCEL_SELECT  (enabled)  select Cancel in Actions
+--   SUG_OEXOEORD_BLOCK_CANCEL_OK      (enabled)  OK with Cancel selected
+--   SUG_OEXOEORD_HIDE_CANCEL          (disabled) remove Cancel from the list
 --
--- Run as APPS. Re-runnable: skips insert if RULE_KEY already exists.
--- Preferred install for TEST/PROD after validating in DEV via the form UI
--- (see sql/oexoeord_restrict_manual_cancel_setup_notes.sql).
+-- Run as APPS. Re-runnable: replaces the SUG_OEXOEORD_*CANCEL* rules above.
+-- After install, close and reopen Sales Orders.
+-- UI key-in steps: sql/oexoeord_restrict_manual_cancel_setup_notes.sql
 -------------------------------------------------------------------------------
 
 set serveroutput on size unlimited
 set define off
 
 declare
-  l_user_id      number;
-  l_login_id     number;
-  l_rule_id      number;
-  l_action_id    number;
-  l_sequence     number;
-  l_exists       number;
-  l_msg          varchar2(4000);
+  l_user_id   number;
+  l_login_id  number;
+  l_sequence  number;
+  l_msg       varchar2(4000);
+
+  procedure delete_owned_rules is
+  begin
+    delete from fnd_form_custom_params
+     where action_id in (
+             select a.action_id
+               from fnd_form_custom_actions a,
+                    fnd_form_custom_rules r
+              where a.rule_id = r.id
+                and r.rule_key in ('SUG_OEXOEORD_NO_MANUAL_CANCEL',
+                                   'SUG_OEXOEORD_BLOCK_CANCEL_SELECT',
+                                   'SUG_OEXOEORD_BLOCK_CANCEL_OK',
+                                   'SUG_OEXOEORD_HIDE_CANCEL'));
+
+    delete from fnd_form_custom_actions
+     where rule_id in (
+             select id
+               from fnd_form_custom_rules
+              where rule_key in ('SUG_OEXOEORD_NO_MANUAL_CANCEL',
+                                 'SUG_OEXOEORD_BLOCK_CANCEL_SELECT',
+                                 'SUG_OEXOEORD_BLOCK_CANCEL_OK',
+                                 'SUG_OEXOEORD_HIDE_CANCEL'));
+
+    delete from fnd_form_custom_scopes
+     where rule_id in (
+             select id
+               from fnd_form_custom_rules
+              where rule_key in ('SUG_OEXOEORD_NO_MANUAL_CANCEL',
+                                 'SUG_OEXOEORD_BLOCK_CANCEL_SELECT',
+                                 'SUG_OEXOEORD_BLOCK_CANCEL_OK',
+                                 'SUG_OEXOEORD_HIDE_CANCEL'));
+
+    delete from fnd_form_custom_rules
+     where rule_key in ('SUG_OEXOEORD_NO_MANUAL_CANCEL',
+                        'SUG_OEXOEORD_BLOCK_CANCEL_SELECT',
+                        'SUG_OEXOEORD_BLOCK_CANCEL_OK',
+                        'SUG_OEXOEORD_HIDE_CANCEL');
+  end delete_owned_rules;
+
+  procedure add_scope(p_rule_id number) is
+  begin
+    insert into fnd_form_custom_scopes (
+      rule_id,
+      level_id,
+      level_value,
+      level_value_application_id,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date,
+      last_update_login
+    ) values (
+      p_rule_id,
+      10001,  -- Site
+      0,
+      0,
+      l_user_id,
+      sysdate,
+      l_user_id,
+      sysdate,
+      l_login_id
+    );
+  end add_scope;
+
+  function add_rule(
+    p_seq           number,
+    p_rule_key      varchar2,
+    p_description   varchar2,
+    p_trigger_event varchar2,
+    p_enabled       varchar2
+  ) return number is
+    l_rule_id number;
+  begin
+    select fnd_form_custom_rules_s.nextval
+      into l_rule_id
+      from dual;
+
+    insert into fnd_form_custom_rules (
+      id,
+      sequence,
+      function_name,
+      form_name,
+      description,
+      trigger_event,
+      trigger_object,
+      condition,
+      enabled,
+      fire_in_enter_query,
+      rule_type,
+      rule_key,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date,
+      last_update_login
+    ) values (
+      l_rule_id,
+      p_seq,
+      'ONT_OEXOEORD',
+      'OEXOEORD',
+      p_description,
+      p_trigger_event,
+      'ACTIONS',
+      q'[UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL']',
+      p_enabled,
+      'N',
+      'F',
+      p_rule_key,
+      l_user_id,
+      sysdate,
+      l_user_id,
+      sysdate,
+      l_login_id
+    );
+
+    add_scope(l_rule_id);
+    return l_rule_id;
+  end add_rule;
+
+  procedure add_error_action(p_rule_id number, p_summary varchar2) is
+    l_action_id number;
+  begin
+    select fnd_form_custom_actions_s.nextval
+      into l_action_id
+      from dual;
+
+    insert into fnd_form_custom_actions (
+      action_id,
+      rule_id,
+      sequence,
+      action_type,
+      enabled,
+      language,
+      message_type,
+      message_text,
+      summary,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date,
+      last_update_login
+    ) values (
+      l_action_id,
+      p_rule_id,
+      10,
+      'M',
+      'Y',
+      '*',
+      'E',
+      'Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.',
+      p_summary,
+      l_user_id,
+      sysdate,
+      l_user_id,
+      sysdate,
+      l_login_id
+    );
+  end add_error_action;
+
+  procedure add_hide_action(p_rule_id number) is
+    l_action_id number;
+  begin
+    select fnd_form_custom_actions_s.nextval
+      into l_action_id
+      from dual;
+
+    insert into fnd_form_custom_actions (
+      action_id,
+      rule_id,
+      sequence,
+      action_type,
+      enabled,
+      language,
+      builtin_type,
+      builtin_arguments,
+      summary,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date,
+      last_update_login
+    ) values (
+      l_action_id,
+      p_rule_id,
+      10,
+      'B',
+      'Y',
+      '*',
+      'DO_KEY',
+      'DELETE_RECORD',
+      'Hide Cancel from Actions list',
+      l_user_id,
+      sysdate,
+      l_user_id,
+      sysdate,
+      l_login_id
+    );
+  end add_hide_action;
+
 begin
   l_user_id  := nvl(fnd_global.user_id, 0);
   l_login_id := nvl(fnd_global.login_id, -1);
 
-  select count(*)
-    into l_exists
-    from fnd_form_custom_rules
-   where rule_key = 'SUG_OEXOEORD_NO_MANUAL_CANCEL';
+  delete_owned_rules;
 
-  if l_exists > 0 then
-    dbms_output.put_line(
-      'Personalization SUG_OEXOEORD_NO_MANUAL_CANCEL already exists. No changes made.');
-    return;
-  end if;
-
-  select nvl(max(sequence), 0) + 10
+  select nvl(max(sequence), 0)
     into l_sequence
     from fnd_form_custom_rules
    where form_name = 'OEXOEORD';
 
-  select fnd_form_custom_rules_s.nextval
-    into l_rule_id
-    from dual;
+  -- Rule 1: block highlighting / selecting Cancel in the Actions list
+  add_error_action(
+    add_rule(
+      l_sequence + 10,
+      'SUG_OEXOEORD_BLOCK_CANCEL_SELECT',
+      'Restrict manual Cancel - block select',
+      'WHEN-NEW-RECORD-INSTANCE',
+      'Y'),
+    'Error when Cancel is selected');
 
-  insert into fnd_form_custom_rules (
-    id,
-    sequence,
-    function_name,
-    form_name,
-    description,
-    trigger_event,
-    trigger_object,
-    condition,
-    enabled,
-    fire_in_enter_query,
-    rule_type,
-    rule_key,
-    created_by,
-    creation_date,
-    last_updated_by,
-    last_update_date,
-    last_update_login
-  ) values (
-    l_rule_id,
-    l_sequence,
-    'ONT_OEXOEORD',
-    'OEXOEORD',
-    'Restrict manual Cancel from Actions',
-    'WHEN-NEW-RECORD-INSTANCE',
-    'ACTIONS',
-    q'[UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL']',
-    'Y',
-    'N',
-    'F',
-    'SUG_OEXOEORD_NO_MANUAL_CANCEL',
-    l_user_id,
-    sysdate,
-    l_user_id,
-    sysdate,
-    l_login_id
-  );
+  -- Rule 2: block OK if Cancel is still the current action
+  add_error_action(
+    add_rule(
+      l_sequence + 20,
+      'SUG_OEXOEORD_BLOCK_CANCEL_OK',
+      'Restrict manual Cancel - block OK',
+      'WHEN-VALIDATE-RECORD',
+      'Y'),
+    'Error when OK is used on Cancel');
 
-  insert into fnd_form_custom_scopes (
-    rule_id,
-    level_id,
-    level_value,
-    level_value_application_id,
-    created_by,
-    creation_date,
-    last_updated_by,
-    last_update_date,
-    last_update_login
-  ) values (
-    l_rule_id,
-    10001,   -- Site
-    0,
-    0,
-    l_user_id,
-    sysdate,
-    l_user_id,
-    sysdate,
-    l_login_id
-  );
-
-  select fnd_form_custom_actions_s.nextval
-    into l_action_id
-    from dual;
-
-  insert into fnd_form_custom_actions (
-    action_id,
-    rule_id,
-    sequence,
-    action_type,
-    enabled,
-    language,
-    message_type,
-    message_text,
-    summary,
-    created_by,
-    creation_date,
-    last_updated_by,
-    last_update_date,
-    last_update_login
-  ) values (
-    l_action_id,
-    l_rule_id,
-    10,
-    'M',     -- Message
-    'Y',
-    '*',
-    'E',     -- Error (raises form_trigger_failure)
-    'Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.',
-    'Block Actions > Cancel',
-    l_user_id,
-    sysdate,
-    l_user_id,
-    sysdate,
-    l_login_id
-  );
+  -- Rule 3: hide Cancel from the list (off until tested in DEV)
+  add_hide_action(
+    add_rule(
+      l_sequence + 30,
+      'SUG_OEXOEORD_HIDE_CANCEL',
+      'Restrict manual Cancel - hide from list',
+      'WHEN-NEW-RECORD-INSTANCE',
+      'N'));
 
   commit;
 
-  dbms_output.put_line('Installed Forms Personalization:');
-  dbms_output.put_line('  RULE_KEY  = SUG_OEXOEORD_NO_MANUAL_CANCEL');
-  dbms_output.put_line('  RULE_ID   = ' || l_rule_id);
-  dbms_output.put_line('  SEQUENCE  = ' || l_sequence);
-  dbms_output.put_line('  ACTION_ID = ' || l_action_id);
-  dbms_output.put_line('Close and reopen Sales Orders for the rule to take effect.');
+  dbms_output.put_line('Installed OEXOEORD Cancel restriction personalizations.');
+  dbms_output.put_line('  SUG_OEXOEORD_BLOCK_CANCEL_SELECT  enabled Y  (WHEN-NEW-RECORD-INSTANCE)');
+  dbms_output.put_line('  SUG_OEXOEORD_BLOCK_CANCEL_OK      enabled Y  (WHEN-VALIDATE-RECORD)');
+  dbms_output.put_line('  SUG_OEXOEORD_HIDE_CANCEL          enabled N  (DELETE_RECORD; enable after DEV test)');
+  dbms_output.put_line('Close and reopen Sales Orders for the rules to take effect.');
 exception
   when others then
     rollback;
