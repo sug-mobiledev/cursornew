@@ -1,0 +1,218 @@
+-------------------------------------------------------------------------------
+-- Setup notes: Restrict manual Cancel on Sales Orders (OEXOEORD)
+-- Install script: sql/oexoeord_restrict_manual_cancel.sql
+-------------------------------------------------------------------------------
+--
+-- PURPOSE
+--   Restrict the manual Cancel option on the order creation screen
+--   (Sales Orders form). Covers Actions on Order Information (header)
+--   and Line Items (line). API / workflow cancel is not changed.
+--
+-- FORM
+--   Form name     : OEXOEORD
+--   User form     : Sales Orders
+--   Function      : ONT_OEXOEORD
+--   Navigation    : Order Management Super User
+--                   > Orders, Returns > Sales Orders
+--
+-------------------------------------------------------------------------------
+-- METHOD 1 (DEV): key the personalizations in the form
+-------------------------------------------------------------------------------
+--
+-- Profiles:
+--   Hide Diagnostics menu entry = No
+--   Utilities: Diagnostics     = Yes
+--
+-- Open Sales Orders (create or query an order).
+-- Help > Diagnostics > Custom Code > Personalize
+--
+-- Enter TWO enabled rules. Save. Close the form fully and reopen.
+--
+-- ---------------------------------------------------------------------------
+-- RULE 1 of 2  (required)  -- block selecting Cancel
+-- ---------------------------------------------------------------------------
+-- Condition tab
+--   Seq            : 10   (or next free sequence)
+--   Description    : Restrict manual Cancel - block select
+--   Level          : Form
+--   Enabled        : Yes
+--   Trigger Event  : WHEN-NEW-RECORD-INSTANCE
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
+--
+-- Context tab
+--   Level          : Site
+--   Value          : (blank)
+--
+-- Actions tab
+--   Seq            : 10
+--   Type           : Message
+--   Language       : All
+--   Enabled        : Yes
+--   Message Type   : Error
+--   Message Text   : Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.
+--
+-- ---------------------------------------------------------------------------
+-- RULE 2 of 2  (required)  -- block OK if Cancel is still selected
+-- ---------------------------------------------------------------------------
+-- Condition tab
+--   Seq            : 20
+--   Description    : Restrict manual Cancel - block OK
+--   Level          : Form
+--   Enabled        : Yes
+--   Trigger Event  : WHEN-VALIDATE-RECORD
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
+--
+-- Context tab
+--   Level          : Site
+--
+-- Actions tab
+--   Seq            : 10
+--   Type           : Message
+--   Language       : All
+--   Enabled        : Yes
+--   Message Type   : Error
+--   Message Text   : Manual Cancel is not allowed from the Sales Order form. Please contact the Order Management administrator.
+--
+-- ---------------------------------------------------------------------------
+-- RULE 3        (optional)  -- hide Cancel from the Actions list
+-- ---------------------------------------------------------------------------
+-- Enable this only after Rule 1 and 2 work. If the Actions window fails
+-- to open, disable this rule (Enabled = No).
+--
+-- Condition tab
+--   Seq            : 30
+--   Description    : Restrict manual Cancel - hide from list
+--   Level          : Form
+--   Enabled        : No     -- set to Yes after DEV test
+--   Trigger Event  : WHEN-NEW-RECORD-INSTANCE
+--   Trigger Object : ACTIONS
+--   Condition      : UPPER(LTRIM(RTRIM(:ACTIONS.ACTION))) = 'CANCEL'
+--   Processing Mode: Not in Enter-Query Mode
+--
+-- Context tab
+--   Level          : Site
+--
+-- Actions tab
+--   Seq            : 10
+--   Type           : Builtin
+--   Language       : All
+--   Enabled        : Yes
+--   Builtin Type   : DO_KEY
+--   Argument       : DELETE_RECORD
+--
+-------------------------------------------------------------------------------
+-- If the rule does not fire
+-------------------------------------------------------------------------------
+--
+-- Open Actions, highlight Cancel, then:
+--   Help > Diagnostics > Examine
+--
+-- Confirm:
+--   Block = ACTIONS
+--   Field = ACTION
+--   Value = Cancel
+--
+-- If the field name is different, change the Condition, for example:
+--   UPPER(LTRIM(RTRIM(:ACTIONS.ACTION_NAME))) = 'CANCEL'
+--   UPPER(LTRIM(RTRIM(:ACTIONS.USER_ACTION))) = 'CANCEL'
+--
+-- Recover a broken form:
+--   Help > Diagnostics > Custom Code > Off
+--   then Personalize and disable the failing rule.
+--
+-------------------------------------------------------------------------------
+-- METHOD 2: SQL install (TEST / PROD after DEV sign-off)
+-------------------------------------------------------------------------------
+--
+--   sqlplus apps/<pwd> @sql/oexoeord_restrict_manual_cancel.sql
+--
+-- Re-runnable. Replaces these rule keys:
+--   SUG_OEXOEORD_BLOCK_CANCEL_SELECT
+--   SUG_OEXOEORD_BLOCK_CANCEL_OK
+--   SUG_OEXOEORD_HIDE_CANCEL
+--   SUG_OEXOEORD_NO_MANUAL_CANCEL   (older single-rule key)
+--
+-- Verify:
+--
+--   select r.sequence,
+--          r.rule_key,
+--          r.description,
+--          r.trigger_event,
+--          r.trigger_object,
+--          r.condition,
+--          r.enabled rule_enabled,
+--          a.action_type,
+--          a.message_type,
+--          a.builtin_type,
+--          a.builtin_arguments,
+--          a.message_text
+--     from fnd_form_custom_rules r,
+--          fnd_form_custom_actions a
+--    where r.id = a.rule_id
+--      and r.rule_key like 'SUG_OEXOEORD_%CANCEL%'
+--    order by r.sequence, a.sequence;
+--
+-- Disable all three quickly:
+--
+--   update fnd_form_custom_rules
+--      set enabled = 'N',
+--          last_update_date = sysdate,
+--          last_updated_by = nvl(fnd_global.user_id, last_updated_by)
+--    where rule_key like 'SUG_OEXOEORD_%CANCEL%';
+--   commit;
+--
+-- Enable hide-from-list after DEV test:
+--
+--   update fnd_form_custom_rules
+--      set enabled = 'Y',
+--          last_update_date = sysdate
+--    where rule_key = 'SUG_OEXOEORD_HIDE_CANCEL';
+--   commit;
+--
+-- Responsibility-level (optional):
+--   In Personalize, Context Level = Responsibility.
+--   Or update fnd_form_custom_scopes:
+--     level_id = 10003
+--     level_value = <responsibility_id>
+--     level_value_application_id = 660
+--
+-- Do not FNDLOAD-upload for function ONT_OEXOEORD unless you intend to
+-- replace every personalization on that function. Prefer this SQL script.
+--
+-------------------------------------------------------------------------------
+-- TEST
+-------------------------------------------------------------------------------
+--
+--   [ ] Close and reopen Sales Orders after saving
+--   [ ] Line Items > Actions > Cancel shows the error (or is hidden)
+--   [ ] Cancel window does not open
+--   [ ] Order Information > Actions > Cancel is also restricted
+--   [ ] Copy, Price Line, Apply Holds, Calculate Tax still work
+--   [ ] Find % in the Actions window still lists the other actions
+--
+-------------------------------------------------------------------------------
+-- OPTIONAL: Processing Constraints (OM security)
+-------------------------------------------------------------------------------
+--
+-- Personalization only affects the form. To block Cancel even when
+-- Custom Code is Off, also set:
+--
+--   Setup > Rules > Security > Processing Constraints
+--   Application : Oracle Order Management
+--   Entity      : Order Header  (repeat for Order Line)
+--   Operation   : Cancel
+--   User Action : Not Allowed
+--   Enabled     : Yes
+--
+-- Then run Generate Constraints Validation Package.
+--
+-- Quantity reduced to 0 after the cancellation point is a separate cancel
+-- path; use processing constraints for that, not this personalization.
+--
+-- Quick Sales Orders is form OEXOETEL; clone these rules there if needed.
+-------------------------------------------------------------------------------
+/
