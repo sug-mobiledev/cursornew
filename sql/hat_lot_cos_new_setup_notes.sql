@@ -1,0 +1,224 @@
+-------------------------------------------------------------------------------
+-- Setup notes: Hatchery vaccination cost (hat_lot_cos_new)
+-- Install script: sql/hat_lot_cos_new.sql
+-------------------------------------------------------------------------------
+--
+-- PURPOSE
+--   Vaccination cost per chick for broiler hatchery lots, covering:
+--     1. Normal placement     — actual cost (existing practice)
+--     2. Held at hatchery     — 3-day weighted average
+--     3. Offline / delayed    — physical date vs farm-code creation date
+--
+-- SOURCE FUNCTION
+--   Existing hat_lot_cos_new(p_hat_lot, p_hat_orgn_id, p_hatch_date)
+--   (Ajay P[2274], 09-Mar-2026). This version keeps that signature and adds
+--   two optional parameters so current callers do not need to change.
+--
+-------------------------------------------------------------------------------
+-- BUSINESS RULES
+-------------------------------------------------------------------------------
+--
+-- 1. Normal placement broiler farms
+--    Use actual vaccine cost of the hatchery WIP batch on the hatch /
+--    placement date (WIP completion type 44 + vaccine issues 35/43 against
+--    that batch, item cost from sug_cst_pkg.getItemCost).
+--
+--    per_chick = sum(vaccine_qty * item_cost) / sum(chick_qty)
+--
+-- 2. Chicks held at any hatchery
+--    Do not use that day's actual batch (it is often incomplete or zero).
+--    Use the chick-weighted average vaccination cost of the previous three
+--    hatchery production days at the same organization:
+--
+--      WA = (V1+V2+V3) / (C1+C2+C3)
+--
+--    where Vd = vaccine value on as_of-d, Cd = vaccinated-batch chick qty.
+--    Days with no vaccinated production add nothing (they do not pull the
+--    average to zero).
+--
+--    Caller: hat_lot_cos_new(lot, org, hatch_date, 'Y')
+--
+-- 3. Offline / delayed farm-code (two cost impacts)
+--    Physical placement and system farm-code creation happen on different
+--    days. The hatchery production batch tied to farm-code creation has no
+--    vaccine issues, so cost is ZERO if the old ±1 day / FETCH FIRST logic
+--    is used.
+--
+--    Example
+--      Physical placement     : 17-Jul-26
+--      Farm code created      : 21-Jul-26
+--      Hatchery batch on 21-Jul has no hatchery / vaccine cost.
+--
+--      Impact A — delayed farm (17-Jul chicks)
+--        Old: cost taken from the 21-Jul batch  →  0
+--        New: cost taken from 17-Jul hatchery production (physical date),
+--             or from the same lot looked back up to 10 days.
+--
+--      Impact B — genuine 21-Jul placements
+--        Old: the empty 21-Jul batch (FETCH FIRST, latest type 44) is used
+--             →  0 for 21-Jul placed chicks as well
+--        New: empty batches (no vaccine issues) are skipped; other 21-Jul
+--             batches with vaccines are used; if the whole day is empty,
+--             fall back to the previous 3-day weighted average.
+--
+--    Caller when physical date is known (best for delayed farms):
+--      hat_lot_cos_new(lot, org, farm_code_date, 'N', physical_place_date)
+--
+--    Caller when only hatch_date is known (3-argument, existing reports):
+--      hat_lot_cos_new(lot, org, hatch_date)
+--      Resolution order:
+--        a. actual lot cost on hatch_date ± 1 day
+--        b. actual lot cost looking back 10 days (same lot, earlier hatch)
+--        c. other hatchery batches on hatch_date that have vaccine issues
+--        d. 3-day weighted average of previous production days
+--
+-------------------------------------------------------------------------------
+-- WHAT CHANGED IN THE FUNCTION
+-------------------------------------------------------------------------------
+--
+-- Kept
+--   Vaccine categories VACCINES / VACCINES.LIVE, category set 1
+--   Org 1433 item restriction (NDKILLEDGENTYP7, XNEL4GM, IBHKD1000, GENTAMINJ)
+--   Chick item 25197, WIP completion 44, WIP issue/return 35 and 43
+--   getItemCost with 0 / -30 / -60 day fallback
+--   GTT cache sug_rpt_common_gtt set_code HAT_LOT_CST (non-zero rates only)
+--
+-- Fixed
+--   Cursor XA used FETCH FIRST ROW ONLY ordered by transaction_date desc.
+--   The latest type 44 (the delayed farm-code batch) hid the real vaccinated
+--   batch. All matching batches are now aggregated; batches with no vaccine
+--   issues are excluded from both numerator and chick denominator.
+--
+--   GTT no longer returns a cached 0, so delayed lots can be recomputed.
+--
+-------------------------------------------------------------------------------
+-- INSTALL
+-------------------------------------------------------------------------------
+--
+-- 1. If hat_lot_cos_new is a packaged function:
+--      - Add p_held_yn and p_physical_date (with defaults) to the spec.
+--      - Replace the function body with sql/hat_lot_cos_new.sql (drop the
+--        CREATE OR REPLACE FUNCTION wrapper; keep the function ... is body).
+--      - Compile the package spec then the body as APPS.
+--
+-- 2. If it is standalone:
+--      @sql/hat_lot_cos_new.sql
+--
+-- 3. Recompile any report package that calls hat_lot_cos_new.
+--
+-------------------------------------------------------------------------------
+-- HOW TO PASS THE EXAMPLE
+-------------------------------------------------------------------------------
+--
+-- Delayed farm: physically placed 17-Jul-26, farm code 21-Jul-26
+--
+--   l_cost := hat_lot_cos_new(
+--               p_hat_lot       => '<hatchery lot>',
+--               p_hat_orgn_id   => <hatchery org id>,
+--               p_hatch_date    => to_date('21-JUL-2026','DD-MON-YYYY'), -- farm code
+--               p_held_yn       => 'N',
+--               p_physical_date => to_date('17-JUL-2026','DD-MON-YYYY')); -- physical
+--
+--   Result: 17-Jul hatchery org vaccine cost per chick (rule 3A).
+--
+-- Genuine 21-Jul placement (same hatchery, not held):
+--
+--   l_cost := hat_lot_cos_new(
+--               p_hat_lot     => '<21-Jul lot>',
+--               p_hat_orgn_id => <hatchery org id>,
+--               p_hatch_date  => to_date('21-JUL-2026','DD-MON-YYYY'));
+--
+--   Result: actual 21-Jul vaccinated batches; empty delayed batch ignored
+--   (rule 3B). If that day has no vaccine issues at all, 3-day WA of
+--   18 / 19 / 20 Jul.
+--
+-- Held chicks placed on 21-Jul:
+--
+--   l_cost := hat_lot_cos_new(
+--               p_hat_lot     => '<lot>',
+--               p_hat_orgn_id => <hatchery org id>,
+--               p_hatch_date  => to_date('21-JUL-2026','DD-MON-YYYY'),
+--               p_held_yn     => 'Y');
+--
+--   Result: weighted average of 20, 19 and 18 Jul (rule 2).
+--
+-- Where to set p_held_yn / p_physical_date in the report:
+--   p_held_yn       = 'Y' when the placement is from hatchery holding
+--                    (not same-day dispatch).
+--   p_physical_date = farm physical placement / chicks-placed date
+--                    when it differs from farm-code creation / hatch_date
+--                    used in the costing run.
+--
+-------------------------------------------------------------------------------
+-- TEST SQL (run as APPS in DEV against the example hatchery)
+-------------------------------------------------------------------------------
+--
+-- 1. Actual lot cost vs 3-day WA vs delayed physical date
+--
+-- select hat_lot_cos_new(:lot, :org, date '2026-07-21') actual_or_fallback,
+--        hat_lot_cos_new(:lot, :org, date '2026-07-21', 'Y') held_3day_wa,
+--        hat_lot_cos_new(:lot, :org, date '2026-07-21', 'N', date '2026-07-17') delayed_physical
+-- from   dual;
+--
+-- 2. WIP completions (type 44) for the lot — shows why FETCH FIRST was wrong
+--
+-- select mmt.transaction_id,
+--        mmt.transaction_date,
+--        mmt.transaction_source_id batch_id,
+--        mmt.transaction_quantity  chick_qty,
+--        mtl.lot_number
+-- from   mtl_transaction_lot_numbers mtl,
+--        mtl_material_transactions   mmt
+-- where  mtl.transaction_id = mmt.transaction_id
+-- and    mtl.lot_number like :lot || '%'
+-- and    mmt.transaction_type_id = 44
+-- and    mmt.organization_id = :org
+-- and    mmt.inventory_item_id = 25197
+-- and    mmt.transaction_date between date '2026-07-17' and date '2026-07-21' + 0.99999
+-- order  by mmt.transaction_date;
+--
+-- 3. Vaccine issues (35/43) against those batches — empty 21-Jul batch has none
+--
+-- select mmt.transaction_source_id batch_id,
+--        trunc(mmt.transaction_date) txn_date,
+--        msi.segment1 item_no,
+--        sum(mmt.transaction_quantity) * -1 med_qty
+-- from   mtl_material_transactions mmt,
+--        mtl_system_items_b        msi,
+--        mtl_item_categories       mic,
+--        mtl_categories            mc
+-- where  mmt.transaction_type_id in (35, 43)
+-- and    mmt.transaction_source_type_id = 5
+-- and    mmt.organization_id = :org
+-- and    mmt.inventory_item_id = msi.inventory_item_id
+-- and    msi.organization_id = mic.organization_id
+-- and    msi.inventory_item_id = mic.inventory_item_id
+-- and    mic.category_id = mc.category_id
+-- and    mic.category_set_id = 1
+-- and    mc.segment1 in ('VACCINES', 'VACCINES.LIVE')
+-- and    mmt.transaction_source_id in (
+--          select mmt2.transaction_source_id
+--          from   mtl_material_transactions mmt2
+--          where  mmt2.transaction_type_id = 44
+--          and    mmt2.organization_id = :org
+--          and    mmt2.transaction_date between date '2026-07-17'
+--                                          and date '2026-07-21' + 0.99999)
+-- group  by mmt.transaction_source_id, trunc(mmt.transaction_date), msi.segment1
+-- order  by 2, 1;
+--
+-- Expected
+--   17-Jul batch : vaccine qty > 0  →  delayed farm uses this rate
+--   21-Jul batch : no vaccine rows  →  must not drive either farm's cost
+--
+-- 4. 3-day WA check (held) — org-level vaccinated production 18/19/20 Jul
+--    Compare held_3day_wa from query 1 to:
+--      sum(vaccine value those 3 days) / sum(chicks on vaccinated batches)
+--
+-------------------------------------------------------------------------------
+-- ROLLBACK
+-------------------------------------------------------------------------------
+--
+-- Restore the previous hat_lot_cos_new body (3 parameters, FETCH FIRST,
+-- hatch_date ± 1 day only) from source control and recompile.
+--
+-------------------------------------------------------------------------------
